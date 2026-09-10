@@ -38,19 +38,20 @@ OldPlayer_FILES = \
 OldPlayer_FRAMEWORKS = UIKit Foundation MediaPlayer AVFoundation CoreGraphics QuartzCore CoreMedia AudioToolbox CFNetwork OpenGLES
 OldPlayer_PRIVATE_FRAMEWORKS =
 
+# iOS 6 compatibility: no NSURLSession, use NSURLConnection; frame layout, not AutoLayout-dependent
+OldPlayer_CFLAGS = -fobjc-arc -fblocks -mios-version-min=6.0 -Wno-deprecated-declarations -Wno-unknown-pragmas -Wno-unused-function -Wno-unused-variable -Wno-unused-parameter -O2 -ISources -ISources/Models -ISources/Services -ISources/Controllers -ISources/SoftDecode -ISources/Views -I.
+OldPlayer_LDFLAGS = -Wl,-segalign,4000
+
 # Soft decoding (FFmpeg, decode-only static libs built at CI time by
 # tools/build_ffmpeg.sh). The workflow passes FFMPEG_PREFIX on the make
 # command line; without it the SoftDecode sources compile to stubs and the
 # app falls back to system playback.
-$(info FFMPEG_PREFIX=[$(FFMPEG_PREFIX)])
+# NOTE: this block must stay AFTER the base = assignments above, which would
+# otherwise overwrite the += additions.
 ifdef FFMPEG_PREFIX
 OldPlayer_CFLAGS += -DHAS_FFMPEG=1 -I$(FFMPEG_PREFIX)/include
 OldPlayer_LDFLAGS += -L$(FFMPEG_PREFIX)/lib -lavformat -lavcodec -lswscale -lswresample -lavutil -lz -liconv
 endif
-
-# iOS 6 compatibility: no NSURLSession, use NSURLConnection; frame layout, not AutoLayout-dependent
-OldPlayer_CFLAGS = -fobjc-arc -fblocks -mios-version-min=6.0 -Wno-deprecated-declarations -Wno-unknown-pragmas -Wno-unused-function -Wno-unused-variable -Wno-unused-parameter -O2 -ISources -ISources/Models -ISources/Services -ISources/Controllers -ISources/SoftDecode -ISources/Views -I.
-OldPlayer_LDFLAGS = -Wl,-segalign,4000
 
 # No entitlements: this is a regular GUI app. Theos signs with a plain
 # `ldid -S` pseudo-signature, which sideload tools (爱思助手/AltStore/
