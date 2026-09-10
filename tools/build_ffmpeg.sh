@@ -62,17 +62,53 @@ if [ ! -x "$WORK/bin/gas-preprocessor.pl" ]; then
 fi
 export PATH="$WORK/bin:$PATH"
 
+echo "=== Linker detection (must be the toolchain's ld64, not GNU ld) ==="
+LD_TOOL=""
+for cand in "$TOOLCHAIN/ld" "$(command -v ld64 || true)"; do
+  if [ -n "$cand" ] && [ -x "$cand" ]; then LD_TOOL="$cand"; break; fi
+done
+echo "ld64 candidate: ${LD_TOOL:-<none>}"
+ls "$TOOLCHAIN" | head -30
+
 echo "=== Compiler wrappers ==="
-cat > "$WORK/cc-armv7" <<EOF
-#!/bin/sh
-exec "$CLANG" -arch armv7 -isysroot "$SDK" -miphoneos-version-min=6.0 "\$@"
+# Mirrors what Theos passes for TARGET=iphone:clang:9.3:6.0 plus an explicit
+# -B/-fuse-ld so the driver links Mach-O with the toolchain's ld64.
+cat > "$WORK/cc-flags.env" <<EOF
+CLANG="$CLANG"
+SDK="$SDK"
+TOOLCHAIN="$TOOLCHAIN"
+LD_TOOL="$LD_TOOL"
 EOF
-cat > "$WORK/as-armv7" <<EOF
+cat > "$WORK/cc-armv7" <<'EOF'
 #!/bin/sh
-exec "$WORK/bin/gas-preprocessor.pl" -arch arm -- "$CLANG" -arch armv7 -isysroot "$SDK" -miphoneos-version-min=6.0 "\$@"
+HERE=$(dirname "$0")
+. "$HERE/cc-flags.env"
+EXTRA=""
+if [ -n "$LD_TOOL" ]; then
+  EXTRA="-B$TOOLCHAIN -fuse-ld=$LD_TOOL"
+fi
+# shellcheck disable=SC2086
+exec "$CLANG" -arch armv7 -isysroot "$SDK" -miphoneos-version-min=6.0 $EXTRA "$@"
+EOF
+cat > "$WORK/as-armv7" <<'EOF'
+#!/bin/sh
+HERE=$(dirname "$0")
+. "$HERE/cc-flags.env"
+exec "$HERE/bin/gas-preprocessor.pl" -arch arm -- "$CLANG" -arch armv7 -isysroot "$SDK" -miphoneos-version-min=6.0 "$@"
 EOF
 chmod +x "$WORK/cc-armv7" "$WORK/as-armv7"
 "$WORK/cc-armv7" --version | head -2
+
+echo "=== Probing wrapper (compile + link a hello world) ==="
+echo 'int main(void) { return 0; }' > "$WORK/probe.c"
+if "$WORK/cc-armv7" "$WORK/probe.c" -o "$WORK/probe" 2>"$WORK/probe.err"; then
+  echo "wrapper links OK"
+  file "$WORK/probe" || true
+else
+  echo "::error::compiler wrapper cannot link; see probe output below"
+  cat "$WORK/probe.err"
+  exit 1
+fi
 
 pick_tool() {
   for cand in "$TOOLCHAIN/llvm-$1" "$TOOLCHAIN/$1" "$(command -v "llvm-$1" || true)" "$(command -v "$1" || true)"; do
@@ -110,7 +146,11 @@ cd "$SRC"
   --enable-decoder="$DECODERS" \
   --enable-parser="$PARSERS" \
   --enable-bsf=mpeg4_unpack_bframes \
-  --enable-protocol=file,http,tcp
+  --enable-protocol=file,http,tcp || {
+  echo "::error::FFmpeg configure failed; last 60 lines of config.log:"
+  tail -60 ffbuild/config.log || tail -60 config.log || true
+  exit 1
+}
 
 if grep -q "#define HAVE_NEON 1" config.h; then
   echo "NEON enabled"
