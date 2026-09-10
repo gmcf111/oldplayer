@@ -9,6 +9,7 @@
 #ifdef HAS_FFMPEG
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
+#include <libavcodec/bsf.h>
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
 #include <libavutil/imgutils.h>
@@ -18,6 +19,13 @@
 #import <QuartzCore/QuartzCore.h>
 #include <unistd.h>
 #include <math.h>
+
+// Forward declarations for the C callbacks below (the methods are defined
+// later in the @implementation).
+@interface OPSoftDecoder (PrivateCallbacks)
+- (BOOL)shouldStop;
+- (void)fillAudioBuffer:(AudioQueueBufferRef)buffer forQueue:(AudioQueueRef)queue;
+@end
 
 static const int kOutSampleRate = 44100;
 static const int kOutChannels = 2;
@@ -562,8 +570,9 @@ static void AudioQueueCallback(void *inUserData, AudioQueueRef inAQ,
         videoAnchorNow = CACurrentMediaTime();
         [stateLock unlock];
     }
-    AVFrame *clone = av_frame_clone(out);
-    if (!clone) return;
+    // __block: the pointer itself is mutated (freed) inside the block.
+    __block AVFrame *owned = av_frame_clone(out);
+    if (!owned) return;
     int w = out->width, h = out->height;
     int sY = out->linesize[0], sU = out->linesize[1], sV = out->linesize[2];
     const uint8_t *pY = out->data[0], *pU = out->data[1], *pV = out->data[2];
@@ -583,7 +592,7 @@ static void AudioQueueCallback(void *inUserData, AudioQueueRef inAQ,
                 needPreview = NO; // a current frame reached the screen
                 [stateLock unlock];
             }
-            av_frame_free(&clone);
+            av_frame_free(&owned);
             [stateLock lock];
             pendingFrames--;
             [stateLock unlock];
