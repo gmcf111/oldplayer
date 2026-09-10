@@ -1,6 +1,7 @@
 #import "OPFileSourceFactory.h"
 #import "OPWebDAVClient.h"
 #import "OPFTPClient.h"
+#import "OPSMBClient.h"
 
 @implementation OPFileSourceFactory
 
@@ -9,8 +10,7 @@
         case OPProtocolTypeFTP:
             return [[OPFTPClient alloc] initWithServer:server];
         case OPProtocolTypeSMB:
-            // Implemented in Stage 3 (OPSMBClient).
-            return nil;
+            return [[OPSMBClient alloc] initWithServer:server];
         case OPProtocolTypeWebDAV:
         default:
             return [[OPWebDAVClient alloc] initWithServer:server];

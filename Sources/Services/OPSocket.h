@@ -22,6 +22,10 @@
                   maxLength:(NSUInteger)maxLength
                     timeout:(NSTimeInterval)timeout
                       error:(NSError **)error;
+// Reads exactly `length` bytes (or returns nil on EOF/error).
+- (NSData *)readDataOfLength:(NSUInteger)length
+                     timeout:(NSTimeInterval)timeout
+                       error:(NSError **)error;
 
 - (BOOL)isConnected;
 - (void)close;

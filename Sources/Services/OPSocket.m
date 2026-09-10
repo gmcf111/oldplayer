@@ -220,4 +220,23 @@ static NSError *OPSocketError(NSString *message) {
     }
 }
 
+- (NSData *)readDataOfLength:(NSUInteger)length
+                     timeout:(NSTimeInterval)timeout
+                       error:(NSError **)error {
+    NSMutableData *data = [NSMutableData dataWithCapacity:length];
+    while (data.length < length) {
+        uint8_t buffer[16384];
+        NSUInteger want = length - data.length;
+        if (want > sizeof(buffer)) {
+            want = sizeof(buffer);
+        }
+        NSInteger got = [self readIntoBuffer:buffer maxLength:want timeout:timeout error:error];
+        if (got <= 0) {
+            return got == 0 ? nil : nil;
+        }
+        [data appendBytes:buffer length:(NSUInteger)got];
+    }
+    return data;
+}
+
 @end

@@ -23,6 +23,9 @@ OldPlayer_FILES = \
 	Sources/Services/OPWebDAVParser.m \
 	Sources/Services/OPSocket.m \
 	Sources/Services/OPFTPClient.m \
+	Sources/Services/OPNTLM.m \
+	Sources/Services/OPSMBSession.m \
+	Sources/Services/OPSMBClient.m \
 	Sources/Services/OPMediaCache.m
 
 OldPlayer_FRAMEWORKS = UIKit Foundation MediaPlayer AVFoundation CoreGraphics QuartzCore CoreMedia AudioToolbox CFNetwork
