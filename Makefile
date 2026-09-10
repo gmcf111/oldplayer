@@ -10,13 +10,24 @@ APPLICATION_NAME = OldPlayer
 OldPlayer_FILES = \
 	Sources/main.m \
 	Sources/AppDelegate.m \
-	Sources/Controllers/OPRootListViewController.m
+	Sources/Controllers/OPServerListViewController.m \
+	Sources/Controllers/OPServerEditViewController.m \
+	Sources/Controllers/OPFileBrowserViewController.m \
+	Sources/Controllers/OPTransferViewController.m \
+	Sources/Models/OPServer.m \
+	Sources/Models/OPServerStore.m \
+	Sources/Models/OPFileItem.m \
+	Sources/Services/OPFileSourceFactory.m \
+	Sources/Services/OPHTTPTask.m \
+	Sources/Services/OPWebDAVClient.m \
+	Sources/Services/OPWebDAVParser.m \
+	Sources/Services/OPMediaCache.m
 
 OldPlayer_FRAMEWORKS = UIKit Foundation MediaPlayer AVFoundation CoreGraphics QuartzCore CoreMedia AudioToolbox CFNetwork
 OldPlayer_PRIVATE_FRAMEWORKS =
 
 # iOS 6 compatibility: no NSURLSession, use NSURLConnection; frame layout, not AutoLayout-dependent
-OldPlayer_CFLAGS = -fobjc-arc -mios-version-min=6.0 -Wno-deprecated-declarations -Wno-unknown-pragmas -O2 -ISources -I.
+OldPlayer_CFLAGS = -fobjc-arc -fblocks -mios-version-min=6.0 -Wno-deprecated-declarations -Wno-unknown-pragmas -O2 -ISources -I.
 OldPlayer_LDFLAGS = -Wl,-segalign,4000
 
 # No entitlements: this is a regular GUI app. Theos signs with a plain
