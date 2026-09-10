@@ -2,8 +2,9 @@
 #import "OPSoftDecoder.h"
 #import "OPSoftVideoView.h"
 #import <AVFoundation/AVFoundation.h>
+#import <QuartzCore/QuartzCore.h>
 
-@interface OPSoftPlayerViewController () <OPSoftDecoderDelegate> {
+@interface OPSoftPlayerViewController () <OPSoftDecoderDelegate, UIAlertViewDelegate> {
     NSString *urlString;
     NSString *mediaTitle;
     OPSoftDecoder *decoder;
@@ -17,10 +18,14 @@
     UISlider *slider;
     UILabel *audioOnlyLabel;
     UIActivityIndicatorView *spinner;
+    UIView *bufferOverlay;
+    UIActivityIndicatorView *bufferSpinner;
     NSTimer *uiTimer;
     BOOL opened;
     BOOL dragging;
     BOOL dismissed;
+    double lastPosition;   // last reported position, for retry resume
+    double resumePosition; // pending seek after a retry re-opens
 }
 @end
 
@@ -124,6 +129,23 @@
         UIViewAutoresizingFlexibleBottomMargin;
     [self.view addSubview:spinner];
 
+    // Buffering overlay: small dark pill with a spinner and label.
+    bufferOverlay = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 170, 76)];
+    bufferOverlay.backgroundColor = [UIColor colorWithWhite:0 alpha:0.7];
+    bufferOverlay.layer.cornerRadius = 8;
+    bufferOverlay.hidden = YES;
+    bufferSpinner = [[UIActivityIndicatorView alloc]
+        initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhite];
+    bufferSpinner.frame = CGRectMake(18, 22, 32, 32);
+    [bufferOverlay addSubview:bufferSpinner];
+    UILabel *bufferLabel = [[UILabel alloc] initWithFrame:CGRectMake(58, 22, 100, 32)];
+    bufferLabel.text = @"正在缓冲…";
+    bufferLabel.textColor = [UIColor whiteColor];
+    bufferLabel.font = [UIFont systemFontOfSize:15];
+    bufferLabel.backgroundColor = [UIColor clearColor];
+    [bufferOverlay addSubview:bufferLabel];
+    [self.view addSubview:bufferOverlay];
+
     [self layoutBars];
 }
 
@@ -137,6 +159,7 @@
     if (sliderW < 60) sliderW = 60;
     slider.frame = CGRectMake(0, 0, sliderW, 22);
     audioOnlyLabel.frame = CGRectMake(20, (h - 80) / 2, w - 40, 80);
+    bufferOverlay.center = CGPointMake(w / 2, h / 2);
     titleItem.title = mediaTitle;
 }
 
@@ -150,16 +173,31 @@
     [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:NULL];
     [[AVAudioSession sharedInstance] setActive:YES error:NULL];
     if (!decoder) {
-        [spinner startAnimating];
-        decoder = [[OPSoftDecoder alloc] initWithURLString:urlString title:mediaTitle];
-        decoder.delegate = self;
-        [decoder open];
+        [self startDecoder];
         uiTimer = [NSTimer scheduledTimerWithTimeInterval:0.5
                                                    target:self
                                                  selector:@selector(refreshTime)
                                                  userInfo:nil
                                                   repeats:YES];
     }
+}
+
+- (void)startDecoder {
+    [spinner startAnimating];
+    decoder = [[OPSoftDecoder alloc] initWithURLString:urlString title:mediaTitle];
+    decoder.delegate = self;
+    [decoder open];
+}
+
+// Retry after an interruption: re-open and resume from the last position.
+- (void)retryPlayback {
+    [decoder stop];
+    decoder = nil;
+    opened = NO;
+    resumePosition = lastPosition;
+    lastPosition = 0;
+    [self hideBuffering];
+    [self startDecoder];
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
@@ -181,6 +219,7 @@
     dismissed = YES;
     [uiTimer invalidate];
     uiTimer = nil;
+    [self hideBuffering];
     [decoder stop];
     decoder = nil;
     [self dismissViewControllerAnimated:YES completion:nil];
@@ -190,10 +229,22 @@
     if (!opened) return;
     if (decoder.playing) {
         [decoder pause];
+        [self hideBuffering]; // no stall overlay while deliberately paused
     } else {
         [decoder play];
     }
     [self refreshPlayButton];
+}
+
+- (void)showBuffering {
+    if (dismissed || !opened) return;
+    bufferOverlay.hidden = NO;
+    [bufferSpinner startAnimating];
+}
+
+- (void)hideBuffering {
+    bufferOverlay.hidden = YES;
+    [bufferSpinner stopAnimating];
 }
 
 - (void)refreshPlayButton {
@@ -264,9 +315,14 @@
 - (void)softDecoderDidOpen:(OPSoftDecoder *)softDecoder {
     opened = YES;
     [spinner stopAnimating];
+    [self hideBuffering];
     if (!softDecoder.hasVideo && softDecoder.hasAudio) {
         audioOnlyLabel.hidden = NO;
         [videoView clear];
+    }
+    if (resumePosition > 1) {
+        [softDecoder seekToTime:resumePosition];
+        resumePosition = 0;
     }
     [self refreshTime];
     [self refreshPlayButton];
@@ -289,6 +345,7 @@
 - (void)softDecoder:(OPSoftDecoder *)softDecoder
   didUpdatePosition:(double)position
            duration:(double)duration {
+    lastPosition = position;
     if (!dragging) {
         if (duration > 0) {
             slider.enabled = YES;
@@ -302,11 +359,43 @@
 }
 
 - (void)softDecoderDidFinish:(OPSoftDecoder *)softDecoder {
+    [self hideBuffering];
     [self dismissNow];
+}
+
+- (void)softDecoderDidStartBuffering:(OPSoftDecoder *)softDecoder {
+    [self showBuffering];
+}
+
+- (void)softDecoderDidEndBuffering:(OPSoftDecoder *)softDecoder {
+    [self hideBuffering];
+}
+
+- (void)softDecoder:(OPSoftDecoder *)softDecoder didInterruptWithError:(NSError *)error {
+    [spinner stopAnimating];
+    [self hideBuffering];
+    if (dismissed) return;
+    NSString *message = error.localizedDescription ?: @"网络连接中断，播放已停止。";
+    UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"播放中断"
+                                                    message:message
+                                                   delegate:self
+                                          cancelButtonTitle:@"关闭"
+                                          otherButtonTitles:@"重试", nil];
+    [alert show];
+}
+
+- (void)alertView:(UIAlertView *)alertView didDismissWithButtonIndex:(NSInteger)buttonIndex {
+    if (dismissed) return;
+    if (buttonIndex == alertView.cancelButtonIndex) {
+        [self dismissNow];
+    } else {
+        [self retryPlayback];
+    }
 }
 
 - (void)softDecoder:(OPSoftDecoder *)softDecoder didFailWithError:(NSError *)error {
     [spinner stopAnimating];
+    [self hideBuffering];
     NSString *message = error.localizedDescription ?: @"软解码失败";
     UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"无法播放"
                                                     message:message

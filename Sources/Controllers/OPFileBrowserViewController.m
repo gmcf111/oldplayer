@@ -330,9 +330,13 @@
                                                   object:finishedPlayer];
 
     NSNumber *reasonValue = [[notification userInfo] objectForKey:MPMoviePlayerPlaybackDidFinishReasonUserInfoKey];
-    BOOL earlyStreamError = (reasonValue.integerValue == MPMovieFinishReasonPlaybackError &&
+    BOOL playbackError = (reasonValue.integerValue == MPMovieFinishReasonPlaybackError);
+    BOOL earlyStreamError = (playbackError &&
                              self.streamingItem != nil && !self.streamBecamePlayable);
     OPFileItem *fallbackItem = earlyStreamError ? self.streamingItem : nil;
+    // A real failure the user should know about: a local file that won't
+    // play, or a stream that died after it had already started.
+    BOOL reportError = (playbackError && fallbackItem == nil);
     self.streamingItem = nil;
     self.moviePlayer = nil;
 
@@ -341,6 +345,15 @@
         // transparently fall back to download-then-play.
         [self dismissViewControllerAnimated:YES completion:^{
             [self downloadAndPlayItem:fallbackItem];
+        }];
+    } else if (reportError) {
+        [self dismissViewControllerAnimated:YES completion:^{
+            UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"无法播放"
+                                                            message:@"该媒体无法播放，文件可能已损坏或中断。"
+                                                           delegate:nil
+                                                  cancelButtonTitle:@"好"
+                                                  otherButtonTitles:nil];
+            [alert show];
         }];
     } else {
         [self dismissViewControllerAnimated:YES completion:nil];

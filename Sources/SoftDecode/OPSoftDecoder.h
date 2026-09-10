@@ -23,8 +23,14 @@
            duration:(double)duration;
 // Playback reached EOF (main thread).
 - (void)softDecoderDidFinish:(OPSoftDecoder *)decoder;
+// The stream broke after playback had started (main thread). Unlike
+// didFailWithError, the user already saw content, so the UI offers a retry.
+- (void)softDecoder:(OPSoftDecoder *)decoder didInterruptWithError:(NSError *)error;
 // Open or decode failed before any frame/audio (main thread).
 - (void)softDecoder:(OPSoftDecoder *)decoder didFailWithError:(NSError *)error;
+// Playback consumed nothing for a while (network stall, main thread).
+- (void)softDecoderDidStartBuffering:(OPSoftDecoder *)decoder;
+- (void)softDecoderDidEndBuffering:(OPSoftDecoder *)decoder;
 @end
 
 /**

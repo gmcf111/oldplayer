@@ -86,6 +86,11 @@ static void AudioQueueCallback(void *inUserData, AudioQueueRef inAQ,
     double durationSec;
     int pendingFrames;
     double lastReportTime;
+    // Buffering detection: stamp of the last actually-played content
+    // (presented video frame or consumed audio). Guarded by stateLock;
+    // touched from the worker, audio, and main threads.
+    double lastProgressStamp;
+    BOOL stallReported;
 
     AudioQueueRef audioQueue;
     AudioQueueBufferRef aqBuffers[3];
@@ -295,10 +300,19 @@ static void AudioQueueCallback(void *inUserData, AudioQueueRef inAQ,
             [self reportOpen];
             if ([self hasAudio]) [self startAudioQueue];
             [self decodeLoop];
+            // Clean EOF leaves pb->error at 0; a dropped connection sets it.
+            // Capture before teardown closes the input.
+            BOOL streamBroken = (fmtCtx && fmtCtx->pb && fmtCtx->pb->error != 0);
             if (everPresented || audioBegan) {
-                [self performSelectorOnMainThread:@selector(notifyFinish)
-                                       withObject:nil
-                                    waitUntilDone:NO];
+                if (![self shouldStop]) {
+                    if (streamBroken) {
+                        [self reportInterruptWithMessage:@"网络连接中断，播放已停止。"];
+                    } else {
+                        [self performSelectorOnMainThread:@selector(notifyFinish)
+                                               withObject:nil
+                                            waitUntilDone:NO];
+                    }
+                }
             } else if (![self shouldStop]) {
                 [self reportFailWithMessage:@"播放中断，媒体可能已损坏。"];
             }
@@ -439,6 +453,7 @@ static void AudioQueueCallback(void *inUserData, AudioQueueRef inAQ,
         av_packet_free(&pkt); av_packet_free(&filtered); av_frame_free(&frame);
         return;
     }
+    [self resetStallDetector];
     while (![self shouldStop]) {
         if ([self takeSeekFlag]) {
             [self doSeek];
@@ -450,6 +465,7 @@ static void AudioQueueCallback(void *inUserData, AudioQueueRef inAQ,
         BOOL paused = pauseFlag && !needPreview;
         [stateLock unlock];
         if (paused) { usleep(20000); continue; }
+        if (!eofFlag) [self checkForStall];
         [stateLock lock];
         BOOL crowded = pendingFrames >= kMaxPendingVideoFrames;
         [stateLock unlock];
@@ -588,6 +604,8 @@ static void AudioQueueCallback(void *inUserData, AudioQueueRef inAQ,
                     [delegate softDecoder:self didRenderY:pY U:pU V:pV
                                     width:w height:h strideY:sY strideU:sU strideV:sV];
                 }
+                // Already on the main thread: report inline.
+                [self notePlaybackProgress];
                 [stateLock lock];
                 needPreview = NO; // a current frame reached the screen
                 [stateLock unlock];
@@ -718,6 +736,7 @@ static void AudioQueueCallback(void *inUserData, AudioQueueRef inAQ,
     [ringLock unlock];
     if (got < want) memset(dst + got, 0, want - got);
     buffer->mAudioDataByteSize = want;
+    BOOL consumedRealAudio = (!stopped && got > 0);
     if (!stopped) {
         [stateLock lock];
         if (audioClockLive) {
@@ -725,6 +744,7 @@ static void AudioQueueCallback(void *inUserData, AudioQueueRef inAQ,
         }
         [stateLock unlock];
     }
+    if (consumedRealAudio) [self notePlaybackProgress];
 }
 
 - (void)teardownAudio {
@@ -796,6 +816,7 @@ static void AudioQueueCallback(void *inUserData, AudioQueueRef inAQ,
         [stateLock lock]; needPreview = YES; [stateLock unlock];
     }
     eofFlag = NO;
+    [self resetStallDetector];
     [self reportProgressNow];
 }
 
@@ -839,7 +860,74 @@ static void AudioQueueCallback(void *inUserData, AudioQueueRef inAQ,
     }
 }
 
+// Playback-side progress: called when a video frame reaches the screen or
+// real audio bytes are consumed. Clears a previously reported stall.
+- (void)notePlaybackProgress {
+    BOOL recovered = NO;
+    [stateLock lock];
+    lastProgressStamp = CACurrentMediaTime();
+    if (stallReported) {
+        stallReported = NO;
+        recovered = YES;
+    }
+    [stateLock unlock];
+    if (recovered) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if ([self.delegate respondsToSelector:@selector(softDecoderDidEndBuffering:)]) {
+                [self.delegate softDecoderDidEndBuffering:self];
+            }
+        });
+    }
+}
+
+// Worker-side check, called from the decode loop: nothing played for a
+// while means the network (or source) stalled.
+- (void)checkForStall {
+    BOOL stalled = NO;
+    [stateLock lock];
+    if (!stallReported && CACurrentMediaTime() - lastProgressStamp > 1.5) {
+        stallReported = YES;
+        stalled = YES;
+    }
+    [stateLock unlock];
+    if (stalled) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if ([self.delegate respondsToSelector:@selector(softDecoderDidStartBuffering:)]) {
+                [self.delegate softDecoderDidStartBuffering:self];
+            }
+        });
+    }
+}
+
+- (void)resetStallDetector {
+    BOOL wasStalled = NO;
+    [stateLock lock];
+    lastProgressStamp = CACurrentMediaTime();
+    if (stallReported) {
+        stallReported = NO;
+        wasStalled = YES;
+    }
+    [stateLock unlock];
+    if (wasStalled) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if ([self.delegate respondsToSelector:@selector(softDecoderDidEndBuffering:)]) {
+                [self.delegate softDecoderDidEndBuffering:self];
+            }
+        });
+    }
+}
+
 #endif // HAS_FFMPEG
+
+- (void)reportInterruptWithMessage:(NSString *)message {
+    NSError *error = [NSError errorWithDomain:@"OPSoftDecoder" code:-2
+                                     userInfo:message ? @{NSLocalizedDescriptionKey: message} : nil];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if ([self.delegate respondsToSelector:@selector(softDecoder:didInterruptWithError:)]) {
+            [self.delegate softDecoder:self didInterruptWithError:error];
+        }
+    });
+}
 
 - (void)reportFailWithMessage:(NSString *)message {
     NSError *error = [NSError errorWithDomain:@"OPSoftDecoder" code:-1
