@@ -1,0 +1,363 @@
+name: OldPlayer Build (Theos armv7 iOS6-9)
+
+on:
+  workflow_dispatch:
+
+# Minimal permissions
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    env:
+      THEOS: ${{ github.workspace }}/theos
+      # Public fallback SDK sources (copyright-safe: SDK fetched at CI time, not committed)
+      # Primary: theos/sdks official patched SDKs (iPhoneOS9.3.sdk, lightweight tbd)
+      SDK_FALLBACK_URL: "https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS9.3.sdk.tar.xz"
+      SDK_FALLBACK_MIRROR: "https://github.com/xybp888/iOS-SDKs/archive/refs/heads/master.tar.gz"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check iOS 6 API guards
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          APIs = {
+              "separatorInset": "setSeparatorInset:",
+              "layoutMargins": "setLayoutMargins:",
+              "preservesSuperviewLayoutMargins": "setPreservesSuperviewLayoutMargins:",
+              "topLayoutGuide": "topLayoutGuide",
+              "bottomLayoutGuide": "bottomLayoutGuide",
+              "setBarStyle:": "setBarStyle:",
+              "setBarTintColor:": "setBarTintColor:",
+              "setEdgesForExtendedLayout:": "setEdgesForExtendedLayout:",
+          }
+          violations = []
+          for path in Path("Sources").rglob("*.[mh]"):
+              lines = path.read_text(encoding="utf-8").splitlines()
+              for index, line in enumerate(lines):
+                  for token, selector in APIs.items():
+                      if token not in line or "respondsToSelector:" in line or "@selector(" + token in line:
+                          continue
+                      if token.endswith(":"):
+                          used = re.search(r"\b" + re.escape(token[:-1]) + r"\s*:", line)
+                      else:
+                          used = re.search(r"\.\s*" + re.escape(token) + r"\b", line)
+                      if not used:
+                          continue
+                      guard = "respondsToSelector:@selector(" + selector + ")"
+                      class_guard = "instancesRespondToSelector:@selector(" + selector + ")"
+                      context = "\n".join(lines[max(0, index - 6):index + 1])
+                      if guard not in context and class_guard not in context:
+                          violations.append("%s:%d uses %s without %s" % (path, index + 1, token, guard))
+
+          # Banned modern APIs: the whole point of this target is iOS 6.
+          BANNED = {
+              "NSURLSession": "Use NSURLConnection (iOS 6 has no NSURLSession)",
+              "AVPlayerViewController": "Use MPMoviePlayerViewController (iOS 6-9)",
+              "MPRemoteCommandCenter": "Use remoteControlReceivedWithEvent: (iOS 5-9)",
+          }
+          for path in Path("Sources").rglob("*.[mh]"):
+              text = path.read_text(encoding="utf-8")
+              for token, why in BANNED.items():
+                  if token in text:
+                      violations.append("%s uses %s: %s" % (path, token, why))
+
+          # UIAppearance objects are forwarding proxies. Their
+          # respondsToSelector: result is not a valid iOS 6 availability check,
+          # so never pass one through the instance-styling helpers.
+          theme_path = Path("Sources/Views/OPTheme.m")
+          if theme_path.exists():
+              theme_source = theme_path.read_text(encoding="utf-8")
+              forbidden_proxy_uses = (
+                  "[self applyToNavigationBar:[UINavigationBar appearance]]",
+                  "[self applyToTabBar:[UITabBar appearance]]",
+              )
+              for use in forbidden_proxy_uses:
+                  if use in theme_source:
+                      violations.append("%s must not pass a UIAppearance proxy to instance styling helpers" % use)
+          if violations:
+              print("::error::iOS 6 compatibility gate failed")
+              print("\n".join(violations))
+              sys.exit(1)
+          print("iOS 6 API guard check passed")
+          PY
+
+      - name: Install dependencies
+        run: |
+          set -e
+          # NB: ldid is NOT in Ubuntu repos and must not appear in these apt lines -
+          # one unknown package makes apt abort the whole line. ldid gets its own step.
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            build-essential fakeroot rsync curl perl zip git libxml2 \
+            libplist-utils dpkg-dev binutils xz-utils unzip zip file \
+            python3-pip
+          # Runtime dependency of the iOS toolchain (per theos/bin/install-theos)
+          sudo apt-get install -y libtinfo6
+          sudo update-alternatives --set fakeroot /usr/bin/fakeroot-sysv 2>/dev/null || true
+          fakeroot --version
+          echo "deps installed"
+
+      - name: Install ldid
+        run: |
+          set -e
+          if command -v ldid >/dev/null 2>&1; then
+            echo "ldid already available at $(command -v ldid)"
+            exit 0
+          fi
+          echo "Installing ldid from Procursus..."
+          curl -LfsS --retry 3 -o /tmp/ldid \
+            "https://github.com/ProcursusTeam/ldid/releases/latest/download/ldid_linux_x86_64"
+          chmod +x /tmp/ldid
+          sudo mv /tmp/ldid /usr/local/bin/ldid
+          command -v ldid && echo "ldid ready"
+
+      - name: Install Theos
+        run: |
+          set -e
+          if [ -d "$THEOS/.git" ]; then
+            echo "Theos already cloned"
+          else
+            git clone --recursive https://github.com/theos/theos.git "$THEOS"
+          fi
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          ls -lh "$THEOS/makefiles/common.mk"
+
+      - name: Install iOS toolchain (clang for linux -> iphone)
+        run: |
+          set -e
+          if [ -x "$THEOS/toolchain/linux/iphone/bin/clang" ]; then
+            echo "Toolchain already installed"
+          else
+            ARCH=$(uname -m)
+            echo "Downloading iOSToolchain (${ARCH})..."
+            curl -fL --retry 3 --retry-delay 5 -o /tmp/toolchain.tar.xz \
+              "https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-${ARCH}.tar.xz"
+            ls -lh /tmp/toolchain.tar.xz
+            mkdir -p "$THEOS/toolchain"
+            tar -xJf /tmp/toolchain.tar.xz -C "$THEOS/toolchain/"
+          fi
+          "$THEOS/toolchain/linux/iphone/bin/clang" --version | head -3
+
+      - name: Fetch iPhoneOS SDK (Secrets-aware, no log leak)
+        env:
+          SDK_URL: ${{ secrets.SDK_URL }}
+          SDK_MIRROR_URL: ${{ secrets.SDK_MIRROR_URL }}
+        run: |
+          set -e
+          mkdir -p "$THEOS/sdks"
+          if [ -n "$SDK_URL" ]; then echo "::add-mask::$SDK_URL"; fi
+          if [ -n "$SDK_MIRROR_URL" ]; then echo "::add-mask::$SDK_MIRROR_URL"; fi
+          echo "Checking SDK in \$THEOS/sdks..."
+          ls -d "$THEOS"/sdks/*.sdk 2>&1 | head -20 || echo "No SDK yet"
+
+          EFFECTIVE_URL=""
+          if [ -n "$SDK_URL" ]; then
+            EFFECTIVE_URL="$SDK_URL"
+            echo "Using SDK_URL from Secrets (masked)"
+          else
+            EFFECTIVE_URL="$SDK_FALLBACK_URL"
+            echo "Secrets.SDK_URL not set, using public fallback:"
+            echo "  $SDK_FALLBACK_URL"
+          fi
+
+          fetch_sdk() {
+            local url="$1"
+            local out="/tmp/sdk.tar.xz"
+            echo "Fetching SDK from: ${url:0:60}... (truncated for log hygiene)"
+            if curl -LfsS --retry 3 --retry-delay 5 -o "$out" "$url"; then
+              echo "Download OK: $(du -h "$out" | cut -f1)"
+              if file "$out" | grep -q "XZ"; then
+                tar -xJf "$out" -C "$THEOS/sdks"
+              elif file "$out" | grep -q "gzip"; then
+                rm -rf /tmp/ios-sdks
+                mkdir -p /tmp/ios-sdks
+                tar -xzf "$out" -C /tmp/ios-sdks
+                cp -R /tmp/ios-sdks/*/iPhoneOS9.3.sdk "$THEOS/sdks/" 2>/dev/null || \
+                  cp -R /tmp/ios-sdks/*/iPhoneOS*.sdk "$THEOS/sdks/" 2>/dev/null || true
+              elif file "$out" | grep -qi "zip"; then
+                rm -rf /tmp/sdk-unzip
+                mkdir -p /tmp/sdk-unzip
+                unzip -q "$out" -d /tmp/sdk-unzip
+                cp -R /tmp/sdk-unzip/*/*.sdk "$THEOS/sdks/" 2>/dev/null || \
+                  cp -R /tmp/sdk-unzip/*.sdk "$THEOS/sdks/" 2>/dev/null || true
+              else
+                tar -xf "$out" -C "$THEOS/sdks" || true
+              fi
+              return 0
+            else
+              echo "Download failed for $url (truncated log)"
+              return 1
+            fi
+          }
+
+          if ls -d "$THEOS"/sdks/iPhoneOS*.sdk >/dev/null 2>&1; then
+            echo "SDK already present, skip download"
+            ls -lh "$THEOS/sdks/"
+          else
+            if ! fetch_sdk "$EFFECTIVE_URL"; then
+              echo "Primary SDK fetch failed, trying mirror fallback..."
+              MIRROR="${SDK_MIRROR_URL:-$SDK_FALLBACK_MIRROR}"
+              fetch_sdk "$MIRROR" || {
+                echo "::error::Failed to fetch any SDK. Check Secrets.SDK_URL or network."
+                exit 1
+              }
+            fi
+          fi
+
+          echo "=== SDKs installed ==="
+          ls -lh "$THEOS/sdks/" | head -40
+          if [ ! -d "$THEOS/sdks/iPhoneOS9.3.sdk" ]; then
+            echo "::error::iPhoneOS9.3.sdk missing (required for TARGET=iphone:clang:9.3:6.0)"
+            ls -d "$THEOS"/sdks/*.sdk 2>&1 | head -20
+            exit 1
+          fi
+
+          python3 tools/patch_sdk_tbd.py "$THEOS/sdks/iPhoneOS9.3.sdk"
+
+          PLATFORM_TBD="$THEOS/sdks/iPhoneOS9.3.sdk/usr/lib/system/libsystem_platform.tbd"
+          tr ',[]' '\n' < "$PLATFORM_TBD" | tr -d ' ' | grep -qx '_memset' \
+            || { echo "::error::libsystem_platform.tbd still lacks _memset"; exit 1; }
+          [ -f "$THEOS/sdks/iPhoneOS9.3.sdk/usr/lib/system/liblaunch.tbd" ] \
+            || { echo "::error::liblaunch.tbd stub missing"; exit 1; }
+          echo "SDK setup complete"
+
+      - name: Generate app icons
+        run: |
+          set -e
+          python3 -m pip install --quiet pillow
+          python3 tools/gen_icons.py Resources
+          ls -la Resources/*.png
+
+      - name: Build (make package)
+        run: |
+          set -e -o pipefail
+          export THEOS="$THEOS"
+          echo "THEOS=$THEOS"
+          echo "ARCHS=armv7 TARGET=iphone:clang:9.3:6.0"
+          make clean 2>&1 | tail -10 || true
+          make -j"$(nproc)" package FINALPACKAGE=1
+
+          echo "=== Build artifacts ==="
+          ls -R .theos | head -60 || true
+          ls -lh packages/ || true
+
+          APP_PATH=""
+          for cand in .theos/obj/OldPlayer.app \
+                      .theos/_/Applications/OldPlayer.app; do
+            if [ -f "$cand/OldPlayer" ] && [ -f "$cand/Info.plist" ]; then
+              APP_PATH="$cand"
+              break
+            fi
+          done
+          if [ -z "$APP_PATH" ]; then
+            APP_PATH=$(find .theos -type d -name "OldPlayer.app" \
+              -exec sh -c '[ -f "$1/OldPlayer" ] && [ -f "$1/Info.plist" ]' _ {} \; \
+              -print 2>/dev/null | head -1)
+          fi
+
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::Build produced no OldPlayer.app containing a binary"
+            find .theos -type d -name "OldPlayer.app" 2>/dev/null || true
+            exit 1
+          fi
+          BIN="$APP_PATH/OldPlayer"
+          echo "Built bundle: $APP_PATH"
+          file "$BIN"
+          file "$BIN" | grep -q "Mach-O" || { echo "::error::$BIN is not a Mach-O binary"; exit 1; }
+          ls -lh "$BIN"
+
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+
+      - name: Patch binary for iOS 6 dyld bindings
+        run: |
+          set -e
+          BIN="$APP_PATH/OldPlayer"
+          [ -f "$BIN" ] || { echo "::error::$BIN missing"; exit 1; }
+          python3 tools/fix_ios6_bindings.py "$BIN"
+          ldid -S "$BIN"
+          echo "=== Post-patch check ==="
+          file "$BIN"
+
+      - name: Assemble IPA (Payload/OldPlayer.app → .ipa)
+        run: |
+          set -e
+          if [ -z "$APP_PATH" ] || [ ! -f "$APP_PATH/OldPlayer" ]; then
+            echo "::error::APP_PATH not set or has no binary: '$APP_PATH'"
+            exit 1
+          fi
+          echo "App path: $APP_PATH"
+          ls -la "$APP_PATH"
+          BIN="$APP_PATH/OldPlayer"
+          file "$BIN"
+          file "$BIN" | grep -q "Mach-O" || { echo "::error::$BIN is not a Mach-O binary"; exit 1; }
+
+          ENT=$(ldid -e "$BIN" 2>/dev/null || true)
+          if echo "$ENT" | grep -q "<key>"; then
+            echo "::error::Binary carries embedded entitlements; personal-cert re-signing cannot install it:"
+            echo "$ENT"
+            exit 1
+          fi
+          echo "Binary has a clean pseudo-signature (no entitlements) - sideload re-sign friendly"
+
+          python3 tools/fix_ios6_bindings.py "$BIN" | tee /tmp/bindings-check.log
+          grep -q "nothing to patch\|relocated .* bindings to Foundation" /tmp/bindings-check.log \
+            || { echo "::error::iOS 6 binding verification failed"; exit 1; }
+          ldid -S "$BIN"
+
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+
+          PLIST="Payload/OldPlayer.app/Info.plist"
+          [ -f "$PLIST" ] || { echo "::error::Info.plist missing from app bundle"; exit 1; }
+          for key in CFBundleIdentifier CFBundleExecutable CFBundleVersion MinimumOSVersion CFBundleIconFiles; do
+            plistutil -i "$PLIST" -f xml | grep -q "<key>$key</key>" \
+              || { echo "::error::Info.plist lacks required key $key"; exit 1; }
+          done
+          echo "Info.plist structure OK"
+          for icon in Icon.png Icon@2x.png Icon-72.png Icon-72@2x.png; do
+            [ -f "Payload/OldPlayer.app/$icon" ] \
+              || { echo "::error::Missing $icon in app bundle"; exit 1; }
+          done
+          echo "App icons present"
+
+          VERSION=$(grep -m1 "^Version:" control | awk '{print $2}')
+          COMMIT=$(git rev-parse --short HEAD)
+          [ -n "$VERSION" ] || { echo "::error::No Version: field in control"; exit 1; }
+          IPA_NAME="OldPlayer-${VERSION}-${COMMIT}-armv7.ipa"
+          rm -f *.ipa
+          zip -r -X "$IPA_NAME" Payload >/dev/null
+          echo "IPA created:"
+          ls -lh *.ipa
+          unzip -l "$IPA_NAME" | head -10
+
+      - name: Upload Artifact (IPA + deb)
+        uses: actions/upload-artifact@v4
+        with:
+          name: OldPlayer-${{ github.sha }}-armv7
+          path: |
+            *.ipa
+            packages/*.deb
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "### OldPlayer Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: $(git rev-parse --short HEAD 2>/dev/null || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
+          echo "- SDKs: $(ls -1 $THEOS/sdks/*.sdk 2>/dev/null | xargs -n1 basename | tr '\n' ',' || echo 'none')" >> $GITHUB_STEP_SUMMARY
+          echo "- Artifacts: $(ls -1 *.ipa 2>/dev/null | tr '\n' ',' || echo 'none') $(ls -1 packages/*.deb 2>/dev/null | tr '\n' ',' || echo '')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Install via AltStore/Sideloadly or jailbreak dpkg -i." >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,34 @@
+# Theos build artifacts
+.theos/
+obj/
+packages/
+Payload/
+*.deb
+*.ipa
+*.dSYM/
+*.o
+*.a
+
+# macOS / Windows
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# SDK (never commit full SDK due to copyright)
+sdks/
+iPhoneOS*.sdk/
+theos/sdks/
+
+# Secrets
+.env
+*.pem
+*.mobileprovision
+
+# Generated at CI time by tools/gen_icons.py from the SVG source
+# (keep the SVG source; PNGs are reproducible artifacts)
+Resources/*.png
+
+# Prompt files - local only, not needed for build, do not track
+提示词/
+__pycache__/
