@@ -138,7 +138,7 @@ Workflow 步骤（`.github/workflows/build.yml`）：
 - SMB 仅支持 SMB 2.0.2 / 2.1；**服务器若强制要求 SMB 签名（signing required）则无法连接**。多数家用 NAS 默认不强制。
 - WebDAV 直链要求服务器接受 URL userinfo 中的 Basic 认证；Digest、自签名 HTTPS 会回退到下载播放。
 - FTP 流要求服务器支持 `REST`（断点续传）；极少数不支持的服务器会自动回退到下载播放。
-- 软解是纯 CPU 解码（带 NEON 汇编优化）：标清/720p H.264 在 A5 及以上设备基本流畅，老设备播高码率/HEVC 会掉帧；字幕轨暂不显示；IPA 会比纯硬解版大十几 MB（静态链接的解码器子集）。
+- 软解是纯 CPU 解码（带 NEON 汇编优化）：标清/720p H.264 在 A5 及以上设备基本流畅，老设备播高码率/HEVC 会掉帧；字幕轨暂不显示；IPA 约 2.3 MB（decode-only 静态链接的解码器子集，比纯硬解版大 2 MB 出头）。
 - 构建时 workflow 会先用 `tools/build_ffmpeg.sh` 交叉编译 FFmpeg 6.1（decode-only，armv7，产物缓存，缺缓存时约 10 分钟），再编 App；`FFMPEG_PREFIX` 不存在时软解文件编译为桩并回退系统播放。
 - SMB 不在 `/` 根处枚举共享列表，必须在路径中写明共享名。
 - WebDAV 的 Digest 认证依赖系统挑战处理；代理/重定向等场景未做特殊处理。
