@@ -9,7 +9,8 @@
 - **FTP**：自实现控制/数据连接（`USER/PASS/TYPE I/CWD/PASV/EPSV/LIST/MLSD/RETR/SIZE`），支持 MLSD、Unix `ls -l` 与 DOS 三种列目录格式。
 - **SMB2**（SMB 2.0.2 / 2.1）：自实现 `NEGOTIATE / SESSION_SETUP / TREE_CONNECT / CREATE / QUERY_DIRECTORY / READ / CLOSE`，使用 **NTLMv2** 认证（MD4 + HMAC-MD5，CommonCrypto）。
 - **目录浏览**：原生 `UITableViewController` + `UITableViewCell`，逐级 push 导航，支持下拉刷新与删除服务器。
-- **播放**：远程媒体先下载到本地缓存，再用 `MPMoviePlayerViewController` 播放（音频/视频通用）；下载过程使用原生 `UIProgressView` 显示进度并可取消。
+- **真流式播放 + 随意 seek**：WebDAV 直接把 HTTP(S) URL 交给 `MPMoviePlayerViewController`；FTP/SMB 走 App 内 `127.0.0.1` 本地代理，把播放器的 `Range` 请求翻译成 FTP `REST+RETR` / SMB 按偏移 `READ`，即点即播、进度条可拖。流失败（认证、Range、协议问题）且尚未播出首帧时自动回退到下载后播放。
+- **下载后播放（回退）**：流不可用时把远程媒体下载到本地缓存再播放；下载过程使用原生 `UIProgressView` 显示进度并可取消。
 - **原生控件**：全部界面使用系统控件（`UINavigationController` / `UITableViewController` / `UIAlertView` / `UISegmentedControl` / `UISwitch` / `UIBarButtonItem` 等），手动 `frame` 布局，无 Storyboard/XIB/AutoLayout/自绘控件。
 
 ## 目录结构
@@ -39,8 +40,13 @@ oldplayer/
 │   │   ├── OPHTTPTask.h/m        # NSURLConnection 封装（Basic/Digest、自签名信任、流式落盘）
 │   │   ├── OPWebDAVClient.h/m    # WebDAV 实现
 │   │   ├── OPWebDAVParser.h/m    # PROPFIND multistatus 解析
-│   │   ├── OPSocket.h/m          # POSIX 阻塞 TCP（超时控制、行/定长读取）
+│   │   ├── OPSocket.h/m          # POSIX 阻塞 TCP（超时控制、行/定长读取、accept 封装）
+│   │   ├── OPFTPConnection.h/m   # FTP 控制连接（登录/PASV/命令应答，列表与流共享）
 │   │   ├── OPFTPClient.h/m       # FTP 实现 + 列表解析
+│   │   ├── OPSeekableStream.h    # 可 seek 字节流抽象（代理用）
+│   │   ├── OPFTPSeekStream.h/m   # FTP 随机读（REST+RETR 分段，会话保持）
+│   │   ├── OPSMBSeekStream.h/m   # SMB2 随机读（偏移 READ，会话/句柄保持）
+│   │   ├── OPLocalHTTPProxy.h/m  # 127.0.0.1 本地代理（Range → FTP/SMB，206/200/416）
 │   │   ├── OPBytes.h             # 小端读写内联工具
 │   │   ├── OPNTLM.h/m            # NTLMv2 (NTLMSSP)
 │   │   ├── OPSMBSession.h/m      # SMB2 会话与文件操作
@@ -78,7 +84,12 @@ oldplayer/
 
 ### 播放
 
-在浏览页点任意音频/视频文件，应用会先把它下载到本地缓存（`Caches/OPMediaCache`），完成后自动用系统播放器打开。下载中可取消。已缓存的文件再次播放会直接使用本地副本。
+在浏览页点任意音频/视频文件，应用优先**流式播放**：
+
+- **WebDAV**：直接把 HTTP(S) URL 交给系统播放器（Basic 认证信息嵌在 URL 中）。
+- **FTP/SMB**：通过本机 `127.0.0.1` 代理播放，进度条可随意拖动（seek 触发新的 Range 请求）。
+
+若流在播出首帧前失败（如 Digest 认证、自签名 HTTPS、不支持 `REST` 的 FTP 服务器），会自动回退到**下载后播放**：先把文件下载到本地缓存（`Caches/OPMediaCache`，可取消），完成后用系统播放器打开。已缓存的文件再次播放会直接使用本地副本。
 
 支持的播放扩展名：`mp4 m4v mov 3gp 3g2 mp3 m4a aac wav aif aiff caf m4b`。
 
@@ -121,7 +132,8 @@ Workflow 步骤（`.github/workflows/build.yml`）：
 ## 已知限制
 
 - SMB 仅支持 SMB 2.0.2 / 2.1；**服务器若强制要求 SMB 签名（signing required）则无法连接**。多数家用 NAS 默认不强制。
-- 采用“先下载后播放”，不支持边下边播 / 直接流式播放。
+- WebDAV 直链要求服务器接受 URL userinfo 中的 Basic 认证；Digest、自签名 HTTPS 会回退到下载播放。
+- FTP 流要求服务器支持 `REST`（断点续传）；极少数不支持的服务器会自动回退到下载播放。
 - SMB 不在 `/` 根处枚举共享列表，必须在路径中写明共享名。
 - WebDAV 的 Digest 认证依赖系统挑战处理；代理/重定向等场景未做特殊处理。
 
