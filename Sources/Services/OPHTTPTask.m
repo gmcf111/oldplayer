@@ -1,24 +1,5 @@
 #import "OPHTTPTask.h"
 
-// Base64 for HTTP Basic auth. -[NSData base64EncodedStringWithOptions:] is
-// iOS 7+, so encode manually to stay iOS 6 safe.
-static NSString *OPBase64Encode(NSData *data) {
-    static const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    const unsigned char *bytes = (const unsigned char *)data.bytes;
-    NSUInteger length = data.length;
-    NSMutableString *result = [NSMutableString stringWithCapacity:((length + 2) / 3) * 4];
-    for (NSUInteger i = 0; i < length; i += 3) {
-        NSUInteger n = bytes[i] << 16;
-        if (i + 1 < length) n |= bytes[i + 1] << 8;
-        if (i + 2 < length) n |= bytes[i + 2];
-        [result appendFormat:@"%c", table[(n >> 18) & 0x3F]];
-        [result appendFormat:@"%c", table[(n >> 12) & 0x3F]];
-        [result appendFormat:@"%c", (i + 1 < length) ? table[(n >> 6) & 0x3F] : '='];
-        [result appendFormat:@"%c", (i + 2 < length) ? table[n & 0x3F] : '='];
-    }
-    return result;
-}
-
 @interface OPHTTPTask () <NSURLConnectionDataDelegate, NSURLConnectionDelegate>
 @property (nonatomic, strong) NSURLConnection *connection;
 @property (nonatomic, strong) NSURLRequest *request;

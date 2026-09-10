@@ -27,7 +27,7 @@ OldPlayer_FRAMEWORKS = UIKit Foundation MediaPlayer AVFoundation CoreGraphics Qu
 OldPlayer_PRIVATE_FRAMEWORKS =
 
 # iOS 6 compatibility: no NSURLSession, use NSURLConnection; frame layout, not AutoLayout-dependent
-OldPlayer_CFLAGS = -fobjc-arc -fblocks -mios-version-min=6.0 -Wno-deprecated-declarations -Wno-unknown-pragmas -O2 -ISources -ISources/Models -ISources/Services -ISources/Controllers -ISources/Views -I.
+OldPlayer_CFLAGS = -fobjc-arc -fblocks -mios-version-min=6.0 -Wno-deprecated-declarations -Wno-unknown-pragmas -Wno-unused-function -Wno-unused-variable -Wno-unused-parameter -O2 -ISources -ISources/Models -ISources/Services -ISources/Controllers -ISources/Views -I.
 OldPlayer_LDFLAGS = -Wl,-segalign,4000
 
 # No entitlements: this is a regular GUI app. Theos signs with a plain
