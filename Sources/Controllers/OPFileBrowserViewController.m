@@ -1,6 +1,7 @@
 #import "OPFileBrowserViewController.h"
 #import "OPMediaCache.h"
 #import "OPTransferViewController.h"
+#import "OPLocalHTTPProxy.h"
 #import <MediaPlayer/MediaPlayer.h>
 #import <AVFoundation/AVFoundation.h>
 
@@ -12,6 +13,10 @@
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
 @property (nonatomic, assign) BOOL loaded;
 @property (nonatomic, strong) MPMoviePlayerViewController *moviePlayer;
+// Set while a streamed item plays; used to fall back to download when the
+// stream errors out before the first frame becomes playable.
+@property (nonatomic, strong) OPFileItem *streamingItem;
+@property (nonatomic, assign) BOOL streamBecamePlayable;
 @end
 
 @implementation OPFileBrowserViewController
@@ -178,7 +183,33 @@
 
 #pragma mark - Playback
 
+// Streaming first: WebDAV hands out a direct HTTP(S) URL, while FTP/SMB go
+// through the localhost proxy that translates Range requests. Anything that
+// cannot stream falls back to download-then-play.
 - (void)playItem:(OPFileItem *)item {
+    NSURL *streamURL = [self streamURLForItem:item];
+    if (streamURL) {
+        [self playStreamURL:streamURL item:item];
+        return;
+    }
+    [self downloadAndPlayItem:item];
+}
+
+- (NSURL *)streamURLForItem:(OPFileItem *)item {
+    if ([self.source respondsToSelector:@selector(streamURLForItem:)]) {
+        NSURL *directURL = [self.source streamURLForItem:item];
+        if (directURL) {
+            return directURL;
+        }
+    }
+    if (self.server.protocolType == OPProtocolTypeFTP ||
+        self.server.protocolType == OPProtocolTypeSMB) {
+        return [[OPLocalHTTPProxy sharedProxy] proxyURLForServer:self.server item:item];
+    }
+    return nil;
+}
+
+- (void)downloadAndPlayItem:(OPFileItem *)item {
     NSString *localPath = [OPMediaCache localPathForServer:self.server item:item];
     NSFileManager *fm = [NSFileManager defaultManager];
     NSDictionary *attrs = [fm attributesOfItemAtPath:localPath error:NULL];
@@ -197,10 +228,32 @@
     [self presentViewController:nav animated:YES completion:nil];
 }
 
+- (void)playStreamURL:(NSURL *)url item:(OPFileItem *)item {
+    [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:NULL];
+    [[AVAudioSession sharedInstance] setActive:YES error:NULL];
+
+    self.streamingItem = item;
+    self.streamBecamePlayable = NO;
+    self.moviePlayer = [[MPMoviePlayerViewController alloc] initWithContentURL:url];
+    self.moviePlayer.moviePlayer.shouldAutoplay = YES;
+    self.moviePlayer.moviePlayer.controlStyle = MPMovieControlStyleDefault;
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(moviePlaybackDidFinish:)
+                                                 name:MPMoviePlayerPlaybackDidFinishNotification
+                                               object:self.moviePlayer.moviePlayer];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(movieLoadStateDidChange:)
+                                                 name:MPMoviePlayerLoadStateDidChangeNotification
+                                               object:self.moviePlayer.moviePlayer];
+    [self presentViewController:self.moviePlayer animated:YES completion:nil];
+}
+
 - (void)playLocalPath:(NSString *)localPath {
     [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:NULL];
     [[AVAudioSession sharedInstance] setActive:YES error:NULL];
 
+    self.streamingItem = nil;
     self.moviePlayer =
         [[MPMoviePlayerViewController alloc] initWithContentURL:[NSURL fileURLWithPath:localPath]];
     self.moviePlayer.moviePlayer.shouldAutoplay = YES;
@@ -213,13 +266,38 @@
     [self presentViewController:self.moviePlayer animated:YES completion:nil];
 }
 
+- (void)movieLoadStateDidChange:(NSNotification *)notification {
+    MPMovieLoadState state = self.moviePlayer.moviePlayer.loadState;
+    if (state & (MPMovieLoadStatePlayable | MPMovieLoadStatePlaythroughOK)) {
+        self.streamBecamePlayable = YES;
+    }
+}
+
 - (void)moviePlaybackDidFinish:(NSNotification *)notification {
+    id finishedPlayer = [notification object];
     [[NSNotificationCenter defaultCenter] removeObserver:self
                                                     name:MPMoviePlayerPlaybackDidFinishNotification
-                                                  object:self.moviePlayer.moviePlayer];
-    [self dismissViewControllerAnimated:YES completion:^{
-        self.moviePlayer = nil;
-    }];
+                                                  object:finishedPlayer];
+    [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                    name:MPMoviePlayerLoadStateDidChangeNotification
+                                                  object:finishedPlayer];
+
+    NSNumber *reasonValue = [[notification userInfo] objectForKey:MPMoviePlayerPlaybackDidFinishReasonUserInfoKey];
+    BOOL earlyStreamError = (reasonValue.integerValue == MPMoviePlaybackDidFinishReasonPlaybackError &&
+                             self.streamingItem != nil && !self.streamBecamePlayable);
+    OPFileItem *fallbackItem = earlyStreamError ? self.streamingItem : nil;
+    self.streamingItem = nil;
+    self.moviePlayer = nil;
+
+    if (fallbackItem) {
+        // The stream never became playable (auth, range or protocol issue):
+        // transparently fall back to download-then-play.
+        [self dismissViewControllerAnimated:YES completion:^{
+            [self downloadAndPlayItem:fallbackItem];
+        }];
+    } else {
+        [self dismissViewControllerAnimated:YES completion:nil];
+    }
 }
 
 @end

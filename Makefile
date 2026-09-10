@@ -27,6 +27,9 @@ OldPlayer_FILES = \
 	Sources/Services/OPNTLM.m \
 	Sources/Services/OPSMBSession.m \
 	Sources/Services/OPSMBClient.m \
+	Sources/Services/OPFTPSeekStream.m \
+	Sources/Services/OPSMBSeekStream.m \
+	Sources/Services/OPLocalHTTPProxy.m \
 	Sources/Services/OPMediaCache.m
 
 OldPlayer_FRAMEWORKS = UIKit Foundation MediaPlayer AVFoundation CoreGraphics QuartzCore CoreMedia AudioToolbox CFNetwork

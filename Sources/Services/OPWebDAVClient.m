@@ -59,6 +59,41 @@ static NSString *OPEncodePath(NSString *path) {
     return [NSURL URLWithString:string];
 }
 
+// Percent-encodes one userinfo component (RFC 3986 unreserved set only).
+static NSString *OPEncodeUserInfo(NSString *string) {
+    const char *utf8 = [string UTF8String];
+    size_t length = utf8 ? strlen(utf8) : 0;
+    NSMutableString *out = [NSMutableString stringWithCapacity:length];
+    for (size_t i = 0; i < length; i++) {
+        unsigned char c = (unsigned char)utf8[i];
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
+            [out appendFormat:@"%c", c];
+        } else {
+            [out appendFormat:@"%%%02X", c];
+        }
+    }
+    return out;
+}
+
+// Direct HTTP(S) URL for true streaming in MPMoviePlayer. Basic credentials
+// ride in the userinfo part; servers that need Digest or reject userinfo
+// fail fast and the browser falls back to download-then-play.
+- (NSURL *)streamURLForItem:(OPFileItem *)item {
+    NSString *scheme = self.server.secure ? @"https" : @"http";
+    NSString *authority = self.server.host ?: @"localhost";
+    if (self.server.username.length > 0) {
+        authority = [NSString stringWithFormat:@"%@:%@@%@",
+                     OPEncodeUserInfo(self.server.username),
+                     OPEncodeUserInfo(self.server.password ?: @""),
+                     authority];
+    }
+    NSString *string = [NSString stringWithFormat:@"%@://%@:%ld%@",
+                        scheme, authority,
+                        (long)self.server.port, OPEncodePath(item.remotePath)];
+    return [NSURL URLWithString:string];
+}
+
 - (NSString *)authorizationHeader {
     if (self.server.username.length == 0) {
         return nil;
