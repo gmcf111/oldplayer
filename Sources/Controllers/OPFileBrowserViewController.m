@@ -283,7 +283,7 @@
                                                   object:finishedPlayer];
 
     NSNumber *reasonValue = [[notification userInfo] objectForKey:MPMoviePlayerPlaybackDidFinishReasonUserInfoKey];
-    BOOL earlyStreamError = (reasonValue.integerValue == MPMoviePlaybackDidFinishReasonPlaybackError &&
+    BOOL earlyStreamError = (reasonValue.integerValue == MPMovieFinishReasonPlaybackError &&
                              self.streamingItem != nil && !self.streamBecamePlayable);
     OPFileItem *fallbackItem = earlyStreamError ? self.streamingItem : nil;
     self.streamingItem = nil;
