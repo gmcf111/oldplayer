@@ -15,6 +15,8 @@
 
 - (BOOL)isMediaFile;
 - (BOOL)isPlayableVideo;
+// System player cannot handle these; they go through the FFmpeg soft decoder.
+- (BOOL)isSoftDecodedFormat;
 - (NSString *)extensionLowercase;
 // Human readable byte count ("1.2 MB").
 - (NSString *)formattedSize;

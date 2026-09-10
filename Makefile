@@ -30,13 +30,24 @@ OldPlayer_FILES = \
 	Sources/Services/OPFTPSeekStream.m \
 	Sources/Services/OPSMBSeekStream.m \
 	Sources/Services/OPLocalHTTPProxy.m \
-	Sources/Services/OPMediaCache.m
+	Sources/Services/OPMediaCache.m \
+	Sources/SoftDecode/OPSoftDecoder.m \
+	Sources/SoftDecode/OPSoftVideoView.m \
+	Sources/SoftDecode/OPSoftPlayerViewController.m
 
-OldPlayer_FRAMEWORKS = UIKit Foundation MediaPlayer AVFoundation CoreGraphics QuartzCore CoreMedia AudioToolbox CFNetwork
+OldPlayer_FRAMEWORKS = UIKit Foundation MediaPlayer AVFoundation CoreGraphics QuartzCore CoreMedia AudioToolbox CFNetwork OpenGLES
 OldPlayer_PRIVATE_FRAMEWORKS =
 
+# Soft decoding (FFmpeg, decode-only static libs built at CI time by
+# tools/build_ffmpeg.sh). The workflow exports FFMPEG_PREFIX; without it the
+# SoftDecode sources compile to stubs and the app falls back to system playback.
+ifdef FFMPEG_PREFIX
+OldPlayer_CFLAGS += -DHAS_FFMPEG=1 -I$(FFMPEG_PREFIX)/include
+OldPlayer_LDFLAGS += -L$(FFMPEG_PREFIX)/lib -lavformat -lavcodec -lswscale -lswresample -lavutil -lz -liconv
+endif
+
 # iOS 6 compatibility: no NSURLSession, use NSURLConnection; frame layout, not AutoLayout-dependent
-OldPlayer_CFLAGS = -fobjc-arc -fblocks -mios-version-min=6.0 -Wno-deprecated-declarations -Wno-unknown-pragmas -Wno-unused-function -Wno-unused-variable -Wno-unused-parameter -O2 -ISources -ISources/Models -ISources/Services -ISources/Controllers -ISources/Views -I.
+OldPlayer_CFLAGS = -fobjc-arc -fblocks -mios-version-min=6.0 -Wno-deprecated-declarations -Wno-unknown-pragmas -Wno-unused-function -Wno-unused-variable -Wno-unused-parameter -O2 -ISources -ISources/Models -ISources/Services -ISources/Controllers -ISources/SoftDecode -ISources/Views -I.
 OldPlayer_LDFLAGS = -Wl,-segalign,4000
 
 # No entitlements: this is a regular GUI app. Theos signs with a plain

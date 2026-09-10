@@ -10,7 +10,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 90
 
     env:
       THEOS: ${{ github.workspace }}/theos
@@ -237,6 +237,28 @@ jobs:
           python3 -m pip install --quiet pillow
           python3 tools/gen_icons.py Resources
           ls -la Resources/*.png
+
+      - name: Restore FFmpeg cache (armv7 soft-decode libs)
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: ThirdParty/ffmpeg-armv7
+          key: ffmpeg-6.1-armv7-${{ hashFiles('tools/build_ffmpeg.sh') }}
+
+      - name: Build FFmpeg (decode-only static libs for armv7)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          bash tools/build_ffmpeg.sh
+          ls -lh ThirdParty/ffmpeg-armv7/lib/
+
+      - name: Export FFMPEG_PREFIX
+        run: |
+          set -e
+          PREFIX="$GITHUB_WORKSPACE/ThirdParty/ffmpeg-armv7"
+          [ -f "$PREFIX/lib/libavformat.a" ] || { echo "::error::FFmpeg libs missing at $PREFIX"; exit 1; }
+          echo "FFMPEG_PREFIX=$PREFIX" >> "$GITHUB_ENV"
+          echo "Using FFmpeg at $PREFIX"
 
       - name: Build (make package)
         run: |

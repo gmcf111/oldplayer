@@ -10,6 +10,7 @@
 - **SMB2**（SMB 2.0.2 / 2.1）：自实现 `NEGOTIATE / SESSION_SETUP / TREE_CONNECT / CREATE / QUERY_DIRECTORY / READ / CLOSE`，使用 **NTLMv2** 认证（MD4 + HMAC-MD5，CommonCrypto）。
 - **目录浏览**：原生 `UITableViewController` + `UITableViewCell`，逐级 push 导航，支持下拉刷新与删除服务器。
 - **真流式播放 + 随意 seek**：WebDAV 直接把 HTTP(S) URL 交给 `MPMoviePlayerViewController`；FTP/SMB 走 App 内 `127.0.0.1` 本地代理，把播放器的 `Range` 请求翻译成 FTP `REST+RETR` / SMB 按偏移 `READ`，即点即播、进度条可拖。流失败（认证、Range、协议问题）且尚未播出首帧时自动回退到下载后播放。
+- **软解（FFmpeg）**：系统播不了的 mkv/avi/rmvb/rm/flv/wmv/asf/mpg/ts/vob/webm/ogg/flac/ape/wv/tta/dts/ac3/wma 等走 CPU 软解——FFmpeg 解复用解码，视频经 OpenGL ES 2.0 的 YUV shader 显示，音频经 AudioQueue 播放，同样支持流式 seek（复用本地代理/HTTP 直链），HTTPS 与无 TLS 的情况自动先下载后软播。字幕轨暂不渲染。
 - **下载后播放（回退）**：流不可用时把远程媒体下载到本地缓存再播放；下载过程使用原生 `UIProgressView` 显示进度并可取消。
 - **原生控件**：全部界面使用系统控件（`UINavigationController` / `UITableViewController` / `UIAlertView` / `UISegmentedControl` / `UISwitch` / `UIBarButtonItem` 等），手动 `frame` 布局，无 Storyboard/XIB/AutoLayout/自绘控件。
 
@@ -47,6 +48,9 @@ oldplayer/
 │   │   ├── OPFTPSeekStream.h/m   # FTP 随机读（REST+RETR 分段，会话保持）
 │   │   ├── OPSMBSeekStream.h/m   # SMB2 随机读（偏移 READ，会话/句柄保持）
 │   │   ├── OPLocalHTTPProxy.h/m  # 127.0.0.1 本地代理（Range → FTP/SMB，206/200/416）
+│   │   ├── OPSoftDecoder.h/m     # FFmpeg 软解：解复用/解码/音画同步/PCM 环/AudioQueue
+│   │   ├── OPSoftVideoView.h/m   # OpenGL ES 2.0 YUV420P 显示（BT.601，等比适配）
+│   │   ├── OPSoftPlayerViewController.h/m  # 软播 UI（Done/播放暂停/时间/拖动条）
 │   │   ├── OPBytes.h             # 小端读写内联工具
 │   │   ├── OPNTLM.h/m            # NTLMv2 (NTLMSSP)
 │   │   ├── OPSMBSession.h/m      # SMB2 会话与文件操作
@@ -84,10 +88,10 @@ oldplayer/
 
 ### 播放
 
-在浏览页点任意音频/视频文件，应用优先**流式播放**：
+在浏览页点任意音频/视频文件，应用按扩展名分流，优先**流式播放**：
 
-- **WebDAV**：直接把 HTTP(S) URL 交给系统播放器（Basic 认证信息嵌在 URL 中）。
-- **FTP/SMB**：通过本机 `127.0.0.1` 代理播放，进度条可随意拖动（seek 触发新的 Range 请求）。
+- **系统格式**（mp4/mov/m4v/3gp/mp3/m4a/wav 等）：`MPMoviePlayerViewController` 硬解。WebDAV 直接给 HTTP(S) URL（Basic 认证信息嵌在 URL 中）；FTP/SMB 通过本机 `127.0.0.1` 代理播放，进度条可随意拖动。
+- **软解格式**（mkv/avi/rmvb/flv/wmv/webm/ogg/flac/ape/dts 等）：`OPSoftPlayerViewController` + FFmpeg CPU 解码。HTTP 直链与 FTP/SMB 代理同样即点即播、可拖动；WebDAV HTTPS（软解栈无 TLS）自动先下载后软播。
 
 若流在播出首帧前失败（如 Digest 认证、自签名 HTTPS、不支持 `REST` 的 FTP 服务器），会自动回退到**下载后播放**：先把文件下载到本地缓存（`Caches/OPMediaCache`，可取消），完成后用系统播放器打开。已缓存的文件再次播放会直接使用本地副本。
 
@@ -134,6 +138,8 @@ Workflow 步骤（`.github/workflows/build.yml`）：
 - SMB 仅支持 SMB 2.0.2 / 2.1；**服务器若强制要求 SMB 签名（signing required）则无法连接**。多数家用 NAS 默认不强制。
 - WebDAV 直链要求服务器接受 URL userinfo 中的 Basic 认证；Digest、自签名 HTTPS 会回退到下载播放。
 - FTP 流要求服务器支持 `REST`（断点续传）；极少数不支持的服务器会自动回退到下载播放。
+- 软解是纯 CPU 解码（带 NEON 汇编优化）：标清/720p H.264 在 A5 及以上设备基本流畅，老设备播高码率/HEVC 会掉帧；字幕轨暂不显示；IPA 会比纯硬解版大十几 MB（静态链接的解码器子集）。
+- 构建时 workflow 会先用 `tools/build_ffmpeg.sh` 交叉编译 FFmpeg 6.1（decode-only，armv7，产物缓存，缺缓存时约 10 分钟），再编 App；`FFMPEG_PREFIX` 不存在时软解文件编译为桩并回退系统播放。
 - SMB 不在 `/` 根处枚举共享列表，必须在路径中写明共享名。
 - WebDAV 的 Digest 认证依赖系统挑战处理；代理/重定向等场景未做特殊处理。
 

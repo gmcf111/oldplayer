@@ -2,6 +2,7 @@
 #import "OPMediaCache.h"
 #import "OPTransferViewController.h"
 #import "OPLocalHTTPProxy.h"
+#import "OPSoftPlayerViewController.h"
 #import <MediaPlayer/MediaPlayer.h>
 #import <AVFoundation/AVFoundation.h>
 
@@ -185,14 +186,60 @@
 
 // Streaming first: WebDAV hands out a direct HTTP(S) URL, while FTP/SMB go
 // through the localhost proxy that translates Range requests. Anything that
-// cannot stream falls back to download-then-play.
+// cannot stream falls back to download-then-play. Formats the system player
+// cannot open (mkv/avi/rmvb/...) go through the FFmpeg soft decoder instead.
 - (void)playItem:(OPFileItem *)item {
+    if ([item isSoftDecodedFormat]) {
+        [self softPlayItem:item];
+        return;
+    }
     NSURL *streamURL = [self streamURLForItem:item];
     if (streamURL) {
         [self playStreamURL:streamURL item:item];
         return;
     }
     [self downloadAndPlayItem:item];
+}
+
+// Soft path: stream when the URL is plain HTTP (WebDAV direct or the
+// FTP/SMB localhost proxy - FFmpeg's http client seeks with Range just like
+// MPMoviePlayer). WebDAV HTTPS has no TLS in the soft stack, so those files
+// are downloaded first and decoded locally.
+- (void)softPlayItem:(OPFileItem *)item {
+    NSURL *streamURL = [self streamURLForItem:item];
+    if (streamURL && ![[[streamURL scheme] lowercaseString] isEqualToString:@"https"]) {
+        [self playSoftURLString:[streamURL absoluteString] title:item.name];
+        return;
+    }
+    [self downloadAndSoftPlayItem:item];
+}
+
+- (void)downloadAndSoftPlayItem:(OPFileItem *)item {
+    NSString *localPath = [OPMediaCache localPathForServer:self.server item:item];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSDictionary *attrs = [fm attributesOfItemAtPath:localPath error:NULL];
+    if (attrs && [attrs fileSize] > 0) {
+        [self playSoftURLString:localPath title:item.name];
+        return;
+    }
+
+    OPTransferViewController *transfer =
+        [[OPTransferViewController alloc] initWithSource:self.source item:item localPath:localPath];
+    __weak OPFileBrowserViewController *weakSelf = self;
+    transfer.onComplete = ^(NSString *path) {
+        [weakSelf playSoftURLString:path title:item.name];
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:transfer];
+    [self presentViewController:nav animated:YES completion:nil];
+}
+
+- (void)playSoftURLString:(NSString *)urlString title:(NSString *)title {
+    [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:NULL];
+    [[AVAudioSession sharedInstance] setActive:YES error:NULL];
+
+    OPSoftPlayerViewController *player =
+        [[OPSoftPlayerViewController alloc] initWithURLString:urlString title:title];
+    [self presentViewController:player animated:YES completion:nil];
 }
 
 - (NSURL *)streamURLForItem:(OPFileItem *)item {

@@ -29,6 +29,7 @@ OldPlayer 是面向 iOS 6.0–9.x、32 位 armv7 设备的远程媒体播放器�
   - `OPMediaCache`：下载到 `Caches/OPMediaCache`。
 - `Sources/Controllers/` UIKit 展示与导航：服务器列表、增删改表单、目录浏览、下载进度浮层。
 - 播放优先流式：WebDAV 用 `streamURLForItem:` 直链；FTP/SMB 走 `OPLocalHTTPProxy`（127.0.0.1，把 Range 翻译成 `OPFTPSeekStream` 的 REST+RETR / `OPSMBSeekStream` 的偏移 READ）。首帧前流失败则回退到“先下载后播放”（`OPTransferViewController` + `OPMediaCache` + `MPMoviePlayerViewController`）。
+- 软解（`Sources/SoftDecode/`）：`OPFileItem.isSoftDecodedFormat` 按扩展名分流；`OPSoftDecoder` 用 FFmpeg（CI 由 `tools/build_ffmpeg.sh` 编出 armv7 decode-only 静态库，经 `FFMPEG_PREFIX`/`HAS_FFMPEG` 接入）解码，视频 YUV420P 经 `OPSoftVideoView`（OpenGL ES 2.0）显示，音频重采样到 44.1k 立体声 S16 经 AudioQueue（音频时钟主同步）播放；UI 是 `OPSoftPlayerViewController`。软播同样吃 HTTP 直链/本地代理做流式 seek，HTTPS 先下载后播。
 - `OPFTPConnection` 是 FTP 控制连接的共享实现（`OPFTPClient` 与流共用）；`OPSMBSession` 另暴露 `openFile` / `readFileId` / `closeFileId` 给流使用。
 
 ## 打包链路
