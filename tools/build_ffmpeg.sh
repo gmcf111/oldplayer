@@ -73,13 +73,18 @@ ls "$TOOLCHAIN" | head -30
 echo "=== Compiler wrappers ==="
 # Mirrors what Theos passes for TARGET=iphone:clang:9.3:6.0 plus an explicit
 # -B/-fuse-ld so the driver links Mach-O with the toolchain's ld64.
+# The Linux-hosted driver defaults to x86_64 Linux and ignores -arch, so an
+# explicit -target triple is required to enter Darwin mode. Probe candidates
+# and keep the first one that actually links an ARM Mach-O binary.
 cat > "$WORK/cc-flags.env" <<EOF
 CLANG="$CLANG"
 SDK="$SDK"
 TOOLCHAIN="$TOOLCHAIN"
 LD_TOOL="$LD_TOOL"
+TARGET_FLAGS=""
 EOF
-cat > "$WORK/cc-armv7" <<'EOF'
+write_wrappers() {
+  cat > "$WORK/cc-armv7" <<'EOF'
 #!/bin/sh
 HERE=$(dirname "$0")
 . "$HERE/cc-flags.env"
@@ -88,25 +93,44 @@ if [ -n "$LD_TOOL" ]; then
   EXTRA="-B$TOOLCHAIN -fuse-ld=$LD_TOOL"
 fi
 # shellcheck disable=SC2086
-exec "$CLANG" -arch armv7 -isysroot "$SDK" -miphoneos-version-min=6.0 $EXTRA "$@"
+exec "$CLANG" $TARGET_FLAGS -arch armv7 -isysroot "$SDK" -miphoneos-version-min=6.0 $EXTRA "$@"
 EOF
-cat > "$WORK/as-armv7" <<'EOF'
+  cat > "$WORK/as-armv7" <<'EOF'
 #!/bin/sh
 HERE=$(dirname "$0")
 . "$HERE/cc-flags.env"
-exec "$HERE/bin/gas-preprocessor.pl" -arch arm -- "$CLANG" -arch armv7 -isysroot "$SDK" -miphoneos-version-min=6.0 "$@"
+# shellcheck disable=SC2086
+exec "$HERE/bin/gas-preprocessor.pl" -arch arm -- "$CLANG" $TARGET_FLAGS -arch armv7 -isysroot "$SDK" -miphoneos-version-min=6.0 "$@"
 EOF
-chmod +x "$WORK/cc-armv7" "$WORK/as-armv7"
+  chmod +x "$WORK/cc-armv7" "$WORK/as-armv7"
+}
+
+write_wrappers
 "$WORK/cc-armv7" --version | head -2
 
-echo "=== Probing wrapper (compile + link a hello world) ==="
+echo "=== Probing -target triples (need ARM Mach-O link) ==="
 echo 'int main(void) { return 0; }' > "$WORK/probe.c"
-if "$WORK/cc-armv7" "$WORK/probe.c" -o "$WORK/probe" 2>"$WORK/probe.err"; then
-  echo "wrapper links OK"
-  file "$WORK/probe" || true
-else
-  echo "::error::compiler wrapper cannot link; see probe output below"
-  cat "$WORK/probe.err"
+WIN=""
+for triple in "armv7-apple-darwin" "armv7-apple-ios" "armv7-apple-darwin14"; do
+  echo "--- trying -target $triple ---"
+  sed -i "s|^TARGET_FLAGS=.*|TARGET_FLAGS=\"-target $triple\"|" "$WORK/cc-flags.env"
+  if "$WORK/cc-armv7" "$WORK/probe.c" -o "$WORK/probe" 2>"$WORK/probe-$triple.err"; then
+    if file "$WORK/probe" | grep -qi "arm"; then
+      echo "WINNER: -target $triple"
+      file "$WORK/probe"
+      WIN="$triple"
+      break
+    else
+      echo "linked but not ARM:"
+      file "$WORK/probe" || true
+    fi
+  else
+    tail -5 "$WORK/probe-$triple.err" || true
+  fi
+done
+if [ -z "$WIN" ]; then
+  echo "::error::no -target triple links ARM Mach-O; full probe logs:"
+  cat "$WORK"/probe-*.err
   exit 1
 fi
 
