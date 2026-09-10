@@ -534,6 +534,64 @@ static NSDate *OPSMBDateFromFiletime(uint64_t filetime) {
     }
 }
 
+- (NSData *)openFile:(NSString *)relativePath
+            fileSize:(uint64_t *)fileSizeOut
+               error:(NSError **)error {
+    return [self createPath:relativePath isDirectory:NO fileSize:fileSizeOut error:error];
+}
+
+- (NSData *)readFileId:(NSData *)fileId
+                offset:(uint64_t)offset
+                length:(uint32_t)length
+                 error:(NSError **)error {
+    if (fileId.length < 16) {
+        if (error) *error = OPSMBError(@"无效的文件句柄");
+        return nil;
+    }
+    NSMutableData *body = [NSMutableData data];
+    OPAppendLE16(body, 49);     // StructureSize
+    uint8_t padding = 0;
+    uint8_t readFlags = 0;
+    [body appendBytes:&padding length:1];
+    [body appendBytes:&readFlags length:1];
+    OPAppendLE32(body, length);  // Length
+    OPAppendLE64(body, offset);  // Offset
+    [body appendData:fileId];
+    OPAppendLE32(body, 0);      // MinimumCount
+    OPAppendLE32(body, 0);      // Channel
+    OPAppendLE32(body, 0);      // RemainingBytes
+    OPAppendLE16(body, 0);      // ReadChannelInfoOffset
+    OPAppendLE16(body, 0);      // ReadChannelInfoLength
+    uint8_t bufferByte = 0;
+    [body appendBytes:&bufferByte length:1];
+
+    uint32_t status = 0;
+    NSData *response = [self transact:SMB2_READ body:body status:&status error:error];
+    if (!response) {
+        return nil;
+    }
+    if (status != STATUS_SUCCESS) {
+        if (error) *error = OPSMBErrorForStatus(status);
+        return nil;
+    }
+    if (response.length < 16) {
+        if (error) *error = OPSMBError(@"读取响应无效");
+        return nil;
+    }
+    const uint8_t *bytes = response.bytes;
+    uint8_t dataOffset = bytes[2];
+    uint32_t dataLength = OPReadLE32(bytes + 4);
+    NSInteger localOffset = (NSInteger)dataOffset - 64;
+    if (localOffset < 0 || localOffset + dataLength > (NSInteger)response.length) {
+        if (error) *error = OPSMBError(@"读取数据越界");
+        return nil;
+    }
+    if (dataLength == 0) {
+        return [NSData data];  // EOF
+    }
+    return [response subdataWithRange:NSMakeRange(localOffset, dataLength)];
+}
+
 - (BOOL)downloadFile:(NSString *)relativePath
               toPath:(NSString *)localPath
             progress:(void (^)(long long, long long))progress

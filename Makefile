@@ -22,6 +22,7 @@ OldPlayer_FILES = \
 	Sources/Services/OPWebDAVClient.m \
 	Sources/Services/OPWebDAVParser.m \
 	Sources/Services/OPSocket.m \
+	Sources/Services/OPFTPConnection.m \
 	Sources/Services/OPFTPClient.m \
 	Sources/Services/OPNTLM.m \
 	Sources/Services/OPSMBSession.m \

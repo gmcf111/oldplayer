@@ -31,4 +31,16 @@
             progress:(void (^)(long long, long long))progress
                error:(NSError **)error;
 
+// Random-access primitives used by the streaming reader. The caller must
+// already be connected and tree-connected. Returned fileId must be passed
+// to readFileId: and finally closeFileId:.
+- (NSData *)openFile:(NSString *)relativePath
+            fileSize:(uint64_t *)fileSizeOut
+               error:(NSError **)error;
+- (NSData *)readFileId:(NSData *)fileId
+                offset:(uint64_t)offset
+                length:(uint32_t)length
+                 error:(NSError **)error;
+- (void)closeFileId:(NSData *)fileId;
+
 @end

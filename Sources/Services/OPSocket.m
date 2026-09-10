@@ -53,6 +53,19 @@ static NSError *OPSocketError(NSString *message) {
     return socket;
 }
 
+- (id)initWithFileDescriptor:(int)fd {
+    self = [super init];
+    if (self) {
+        _fd = fd;
+        struct timeval ioTimeout;
+        ioTimeout.tv_sec = 30;
+        ioTimeout.tv_usec = 0;
+        setsockopt(_fd, SOL_SOCKET, SO_RCVTIMEO, &ioTimeout, sizeof(ioTimeout));
+        setsockopt(_fd, SOL_SOCKET, SO_SNDTIMEO, &ioTimeout, sizeof(ioTimeout));
+    }
+    return self;
+}
+
 - (BOOL)connectToHost:(NSString *)host
                  port:(NSInteger)port
               timeout:(NSTimeInterval)timeout

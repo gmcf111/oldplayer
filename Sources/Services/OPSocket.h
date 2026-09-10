@@ -14,6 +14,9 @@
                       timeout:(NSTimeInterval)timeout
                         error:(NSError **)error;
 
+// Wraps an already-connected descriptor (e.g. from accept()).
+- (id)initWithFileDescriptor:(int)fd;
+
 - (BOOL)sendData:(NSData *)data error:(NSError **)error;
 // Reads one '\n'-terminated line (the newline is included).
 - (NSData *)readLineWithTimeout:(NSTimeInterval)timeout error:(NSError **)error;
