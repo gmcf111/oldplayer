@@ -267,7 +267,7 @@ jobs:
           echo "THEOS=$THEOS"
           echo "ARCHS=armv7 TARGET=iphone:clang:9.3:6.0"
           make clean 2>&1 | tail -10 || true
-          make -j"$(nproc)" package FINALPACKAGE=1
+          make -j"$(nproc)" package FINALPACKAGE=1 FFMPEG_PREFIX="$FFMPEG_PREFIX"
 
           echo "=== Build artifacts ==="
           ls -R .theos | head -60 || true

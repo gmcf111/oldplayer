@@ -26,10 +26,10 @@
 
 @implementation OPSoftPlayerViewController
 
-- (id)initWithURLString:(NSString *)urlString title:(NSString *)title {
+- (id)initWithURLString:(NSString *)url title:(NSString *)title {
     self = [super init];
     if (self) {
-        urlString = [urlString copy] ?: @"";
+        urlString = [url copy] ?: @"";
         mediaTitle = [title copy] ?: @"";
     }
     return self;
@@ -261,10 +261,10 @@
 
 #pragma mark - OPSoftDecoderDelegate
 
-- (void)softDecoderDidOpen:(OPSoftDecoder *)decoder {
+- (void)softDecoderDidOpen:(OPSoftDecoder *)softDecoder {
     opened = YES;
     [spinner stopAnimating];
-    if (!decoder.hasVideo && decoder.hasAudio) {
+    if (!softDecoder.hasVideo && softDecoder.hasAudio) {
         audioOnlyLabel.hidden = NO;
         [videoView clear];
     }
@@ -272,7 +272,7 @@
     [self refreshPlayButton];
 }
 
-- (void)softDecoder:(OPSoftDecoder *)decoder
+- (void)softDecoder:(OPSoftDecoder *)softDecoder
          didRenderY:(const uint8_t *)y
                   U:(const uint8_t *)u
                   V:(const uint8_t *)v
@@ -286,7 +286,7 @@
                 strideY:strideY strideU:strideU strideV:strideV];
 }
 
-- (void)softDecoder:(OPSoftDecoder *)decoder
+- (void)softDecoder:(OPSoftDecoder *)softDecoder
   didUpdatePosition:(double)position
            duration:(double)duration {
     if (!dragging) {
@@ -301,11 +301,11 @@
     }
 }
 
-- (void)softDecoderDidFinish:(OPSoftDecoder *)decoder {
+- (void)softDecoderDidFinish:(OPSoftDecoder *)softDecoder {
     [self dismissNow];
 }
 
-- (void)softDecoder:(OPSoftDecoder *)decoder didFailWithError:(NSError *)error {
+- (void)softDecoder:(OPSoftDecoder *)softDecoder didFailWithError:(NSError *)error {
     [spinner stopAnimating];
     NSString *message = error.localizedDescription ?: @"软解码失败";
     UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"无法播放"

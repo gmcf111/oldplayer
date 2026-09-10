@@ -96,10 +96,10 @@ static void AudioQueueCallback(void *inUserData, AudioQueueRef inAQ,
 
 @implementation OPSoftDecoder
 
-- (id)initWithURLString:(NSString *)urlString title:(NSString *)title {
+- (id)initWithURLString:(NSString *)url title:(NSString *)title {
     self = [super init];
     if (self) {
-        urlString = [urlString copy] ?: @"";
+        urlString = [url copy] ?: @"";
         titleString = [title copy] ?: @"";
         stateLock = [[NSLock alloc] init];
         ringLock = [[NSLock alloc] init];
@@ -233,6 +233,39 @@ static void AudioQueueCallback(void *inUserData, AudioQueueRef inAQ,
         }
         [exitCondition unlock];
     }
+}
+
+#pragma mark - Clock (pure logic: always compiled, uses no FFmpeg types,
+// so callers outside #ifdef HAS_FFMPEG can use these too)
+
+// Must only be called on the worker thread (mirrors -currentTime).
+- (double)unlockedClockSnapshot {
+    if (audioBegan) {
+        [stateLock lock];
+        double t = audioBase + audioPlayedSamples / kOutSampleRate;
+        [stateLock unlock];
+        return t;
+    }
+    [stateLock lock];
+    double t;
+    if (pauseFlag) t = videoFrozen;
+    else t = videoAnchorNow > 0 ? (CACurrentMediaTime() - videoAnchorNow + videoAnchorPts) : 0;
+    [stateLock unlock];
+    return t;
+}
+
+// Called with stateLock held.
+- (double)unlockedClock {
+    if (audioBegan) return audioBase + audioPlayedSamples / kOutSampleRate;
+    if (pauseFlag) return videoFrozen;
+    return videoAnchorNow > 0 ? (CACurrentMediaTime() - videoAnchorNow + videoAnchorPts) : 0;
+}
+
+- (int)currentGeneration {
+    [stateLock lock];
+    int g = generation;
+    [stateLock unlock];
+    return g;
 }
 
 #pragma mark - Worker
@@ -749,38 +782,6 @@ static void AudioQueueCallback(void *inUserData, AudioQueueRef inAQ,
     }
     eofFlag = NO;
     [self reportProgressNow];
-}
-
-#pragma mark - Clock / progress
-
-// Must only be called on the worker thread (mirrors -currentTime).
-- (double)unlockedClockSnapshot {
-    if (audioBegan) {
-        [stateLock lock];
-        double t = audioBase + audioPlayedSamples / kOutSampleRate;
-        [stateLock unlock];
-        return t;
-    }
-    [stateLock lock];
-    double t;
-    if (pauseFlag) t = videoFrozen;
-    else t = videoAnchorNow > 0 ? (CACurrentMediaTime() - videoAnchorNow + videoAnchorPts) : 0;
-    [stateLock unlock];
-    return t;
-}
-
-// Called with stateLock held.
-- (double)unlockedClock {
-    if (audioBegan) return audioBase + audioPlayedSamples / kOutSampleRate;
-    if (pauseFlag) return videoFrozen;
-    return videoAnchorNow > 0 ? (CACurrentMediaTime() - videoAnchorNow + videoAnchorPts) : 0;
-}
-
-- (int)currentGeneration {
-    [stateLock lock];
-    int g = generation;
-    [stateLock unlock];
-    return g;
 }
 
 - (void)reportProgressIfDue {

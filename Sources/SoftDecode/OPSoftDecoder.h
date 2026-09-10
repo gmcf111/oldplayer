@@ -38,7 +38,7 @@
  */
 @interface OPSoftDecoder : NSObject
 
-- (id)initWithURLString:(NSString *)urlString title:(NSString *)title;
+- (id)initWithURLString:(NSString *)url title:(NSString *)title;
 
 @property (nonatomic, weak) id<OPSoftDecoderDelegate> delegate;
 

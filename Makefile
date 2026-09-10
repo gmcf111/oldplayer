@@ -39,8 +39,10 @@ OldPlayer_FRAMEWORKS = UIKit Foundation MediaPlayer AVFoundation CoreGraphics Qu
 OldPlayer_PRIVATE_FRAMEWORKS =
 
 # Soft decoding (FFmpeg, decode-only static libs built at CI time by
-# tools/build_ffmpeg.sh). The workflow exports FFMPEG_PREFIX; without it the
-# SoftDecode sources compile to stubs and the app falls back to system playback.
+# tools/build_ffmpeg.sh). The workflow passes FFMPEG_PREFIX on the make
+# command line; without it the SoftDecode sources compile to stubs and the
+# app falls back to system playback.
+$(info FFMPEG_PREFIX=[$(FFMPEG_PREFIX)])
 ifdef FFMPEG_PREFIX
 OldPlayer_CFLAGS += -DHAS_FFMPEG=1 -I$(FFMPEG_PREFIX)/include
 OldPlayer_LDFLAGS += -L$(FFMPEG_PREFIX)/lib -lavformat -lavcodec -lswscale -lswresample -lavutil -lz -liconv

@@ -7,6 +7,6 @@
  */
 @interface OPSoftPlayerViewController : UIViewController
 
-- (id)initWithURLString:(NSString *)urlString title:(NSString *)title;
+- (id)initWithURLString:(NSString *)url title:(NSString *)title;
 
 @end
