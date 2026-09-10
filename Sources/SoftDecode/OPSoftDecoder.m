@@ -1,6 +1,12 @@
 #import "OPSoftDecoder.h"
 
 #ifdef HAS_FFMPEG
+#pragma message("OPSoftDecoder: FULL build with FFmpeg")
+#else
+#pragma message("OPSoftDecoder: STUB build without FFmpeg")
+#endif
+
+#ifdef HAS_FFMPEG
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libswscale/swscale.h>

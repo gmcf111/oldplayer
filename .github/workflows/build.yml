@@ -297,6 +297,9 @@ jobs:
           file "$BIN"
           file "$BIN" | grep -q "Mach-O" || { echo "::error::$BIN is not a Mach-O binary"; exit 1; }
           ls -lh "$BIN"
+          echo "=== FFmpeg linkage check (want DEFINED _avformat_open_input) ==="
+          "$THEOS/toolchain/linux/iphone/bin/llvm-nm" "$BIN" 2>/dev/null | grep -c "avformat_open_input" || true
+          "$THEOS/toolchain/linux/iphone/bin/llvm-nm" "$BIN" 2>/dev/null | grep "avformat_open_input" | head -3 || true
 
           echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
 
