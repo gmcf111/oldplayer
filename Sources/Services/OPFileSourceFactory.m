@@ -1,13 +1,13 @@
 #import "OPFileSourceFactory.h"
 #import "OPWebDAVClient.h"
+#import "OPFTPClient.h"
 
 @implementation OPFileSourceFactory
 
 + (id<OPFileSource>)sourceForServer:(OPServer *)server {
     switch (server.protocolType) {
         case OPProtocolTypeFTP:
-            // Implemented in Stage 2 (OPFTPClient).
-            return nil;
+            return [[OPFTPClient alloc] initWithServer:server];
         case OPProtocolTypeSMB:
             // Implemented in Stage 3 (OPSMBClient).
             return nil;
