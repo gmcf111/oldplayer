@@ -9,7 +9,7 @@
     self.window.backgroundColor = [UIColor whiteColor];
 
     // Playback category keeps audio/video audible (and backgroundable) on
-    // iOS 6-9 without MPRemoteCommandCenter.
+    // iOS 6-9 using only the legacy remote-control event API.
     NSError *audioError = nil;
     [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:&audioError];
     if (audioError) {
