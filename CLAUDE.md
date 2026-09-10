@@ -19,11 +19,16 @@ OldPlayer 是面向 iOS 6.0–9.x、32 位 armv7 设备的远程媒体播放器�
 
 ## 架构
 
-- `Sources/AppDelegate.m` 创建窗口与根导航。
-- `Sources/Models/` 领域与持久化模型（服务器配置、远程文件项）。
-- `Sources/Services/` 协议客户端：`OPFileSource` 抽象 + WebDAV/FTP/SMB 实现 + 下载管理。
-- `Sources/Controllers/` UIKit 展示与导航（服务器列表、浏览、播放）。
-- `Sources/Views/` 可复用单元与主题。
+- `Sources/AppDelegate.m` 创建窗口与根导航，并配置 `AVAudioSessionCategoryPlayback` 后台音频。
+- `Sources/Models/` 领域与持久化模型：`OPServer`（协议枚举 + 凭据）、`OPServerStore`（NSUserDefaults 持久化）、`OPFileItem`（远程文件项）。
+- `Sources/Services/` 协议客户端：
+  - `OPFileSource` 抽象 + `OPFileSourceFactory` 工厂。
+  - `OPWebDAVClient` / `OPWebDAVParser`：NSURLConnection PROPFIND/GET，Basic/Digest，自签名信任。
+  - `OPSocket`（POSIX TCP）+ `OPFTPClient`（被动模式、MLSD/LIST 解析）。
+  - `OPNTLM`（NTLMv2）+ `OPSMBSession`（SMB2.0.2/2.1 协议）+ `OPSMBClient`。
+  - `OPMediaCache`：下载到 `Caches/OPMediaCache`。
+- `Sources/Controllers/` UIKit 展示与导航：服务器列表、增删改表单、目录浏览、下载进度浮层。
+- 播放统一走“先下载后播放”：`OPTransferViewController` 下载完成后由 `OPFileBrowserViewController` 用 `MPMoviePlayerViewController` 打开本地文件。
 
 ## 打包链路
 
